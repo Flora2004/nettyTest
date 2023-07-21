@@ -15,7 +15,8 @@ import io.netty.util.ReferenceCountUtil;
  * Time: 10:37
  */
 public class Client {
-    public static void main(String[] args) {
+    private Channel channel=null;
+    public void connect(){
         //创建group线程池,创建线程处理链接和读取
         EventLoopGroup group=new NioEventLoopGroup(1);
 
@@ -29,18 +30,21 @@ public class Client {
                     .connect("localhost",8888)
                     ;
 
-            f.addListener(new ChannelFutureListener() {
+            f.addListener(new ChannelFutureListener() {//判断客户端是否链接到服务器
                 @Override
-                public void operationComplete(ChannelFuture channelFuture) throws Exception {
-                    if(!channelFuture.isSuccess()){
+                public void operationComplete(ChannelFuture future) throws Exception {
+                    if(!future.isSuccess()){
                         System.out.println("not connected!");
                     }else {
                         System.out.println("connected!");
+                        //连接成功后初始化channel
+                        channel=future.channel();
                     }
                 }
             });
 
             f.sync();
+
             System.out.println("...");
 
             f.channel().closeFuture().sync();
@@ -51,11 +55,25 @@ public class Client {
             group.shutdownGracefully();
         }
     }
+    public void send(String msg){//通过初始化好的channel，将传入的字符串写给服务器
+        ByteBuf buf=Unpooled.copiedBuffer(msg.getBytes());
+        channel.writeAndFlush(buf);
+    }
+    public static void main(String[] args) {
+        Client c=new Client();
+        c.connect();
+    }
+    public void closeConnect(){
+        this.send("_bye_");
+        //channel.close();
+    }
 }
 class ClientChannelInitializer extends ChannelInitializer<SocketChannel>{
     @Override
     protected void initChannel(SocketChannel ch)throws Exception{
-        ch.pipeline().addLast(new ClientHandler());
+        ch.pipeline()
+                .addLast(new TankMsgEncoder())//对传出的信息进行处理
+                .addLast(new ClientHandler());//对服务器传回的消息进行处理
     }
 }
 class  ClientHandler extends ChannelInboundHandlerAdapter{
@@ -66,19 +84,18 @@ class  ClientHandler extends ChannelInboundHandlerAdapter{
             buf = (ByteBuf) msg;
             byte[] bytes = new byte[buf.readableBytes()];
             buf.getBytes(buf.readerIndex(), bytes);
-            System.out.println(new String(bytes));
-
+            String msgAccepted=new String(bytes);
+            ClientFrame.INSTANCE.updateText(msgAccepted);
 //            System.out.println(buf);
 //            System.out.println(buf.refCnt());
         } finally {
-            if (buf != null) ReferenceCountUtil.release(buf);
+            if (buf != null)
+                ReferenceCountUtil.release(buf);
 //            System.out.println(buf.refCnt());
         }
     }
     @Override
     public void channelActive(ChannelHandlerContext ctx) throws Exception {
-        //channel第一次连上可用，写出一个字符串
-        ByteBuf buf= Unpooled.copiedBuffer("hello".getBytes());
-        ctx.writeAndFlush(buf);
+        ctx.writeAndFlush(new TankMsg(5,8));
     }
 }
